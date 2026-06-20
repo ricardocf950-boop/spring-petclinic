@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.ModelMap; // Adicionado para suporte na edição
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -98,6 +99,50 @@ class VisitController {
 		owner.addVisit(petId, visit);
 		this.owners.save(owner);
 		redirectAttributes.addFlashAttribute("message", "Your visit has been booked");
+		return "redirect:/owners/{ownerId}";
+	}
+
+	/**
+	 * NEW: Method to initialize the form for editing an existing visit description.
+	 * Part of Issue #2338.
+	 */
+	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
+	public String initEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, ModelMap model) {
+		Pet pet = owner.getPet(petId);
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId() == visitId) {
+					model.put("visit", v);
+					break;
+				}
+			}
+		}
+		return "pets/createOrUpdateVisitForm"; // Reutilizando a view existente
+	}
+
+	/**
+	 * NEW: Method to process the modification of an existing visit description.
+	 * Part of Issue #2338.
+	 */
+	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
+	public String processEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, 
+			@Valid Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
+		if (result.hasErrors()) {
+			return "pets/createOrUpdateVisitForm";
+		}
+
+		Pet pet = owner.getPet(petId);
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId() == visitId) {
+					v.setDescription(visit.getDescription());
+					v.setDate(visit.getDate());
+					break;
+				}
+			}
+			this.owners.save(owner);
+			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
+		}
 		return "redirect:/owners/{ownerId}";
 	}
 
