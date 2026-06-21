@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 /**
@@ -62,7 +63,7 @@ class VisitController {
 	 */
 	@ModelAttribute("visit")
 	public Visit loadPetWithVisit(@PathVariable("ownerId") int ownerId, @PathVariable("petId") int petId,
-			Map<String, Object> model) {
+			Map<String, Object> model, HttpServletRequest request) {
 		Optional<Owner> optionalOwner = owners.findById(ownerId);
 		Owner owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException(
 				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct "));
@@ -75,33 +76,52 @@ class VisitController {
 		model.put("pet", pet);
 		model.put("owner", owner);
 
-		Visit visit = new Visit();
-		pet.addVisit(visit);
-		return visit;
+		if (request.getRequestURI().endsWith("/new")) {
+			Visit visit = new Visit();
+			pet.addVisit(visit);
+			return visit;
+		}
+		
+		return new Visit();
 	}
 
 	// Spring MVC calls method loadPetWithVisit(...) before initNewVisitForm is
 	// called
-	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/new")
-	public String initNewVisitForm() {
-		return "pets/createOrUpdateVisitForm";
+	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
+	public String initEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, ModelMap model) {
+		Pet pet = owner.getPet(petId);
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId() == visitId) {
+					model.put("visit", v);
+					return "pets/createOrUpdateVisitForm";
+				}
+			}
+		}
+		return "redirect:/owners/{ownerId}";
 	}
 
-	// Spring MVC calls method loadPetWithVisit(...) before processNewVisitForm is
-	// called
-	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/new")
-	public String processNewVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @Valid Visit visit,
-			BindingResult result, RedirectAttributes redirectAttributes) {
+	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
+	public String processEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, 
+			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
 		if (result.hasErrors()) {
 			return "pets/createOrUpdateVisitForm";
 		}
 
-		owner.addVisit(petId, visit);
-		this.owners.save(owner);
-		redirectAttributes.addFlashAttribute("message", "Your visit has been booked");
+		Pet pet = owner.getPet(petId);
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId() == visitId) {
+					v.setDescription(visit.getDescription());
+					v.setDate(visit.getDate());
+					break;
+				}
+			}
+			this.owners.save(owner);
+			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
+		}
 		return "redirect:/owners/{ownerId}";
 	}
-
 	/**
 	 * NEW: Method to initialize the form for editing an existing visit description.
 	 * Part of Issue #2338.
