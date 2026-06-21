@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2026 the original author or authors.
+ * Copyright 2012-2025 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * https://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,9 +17,9 @@ package org.springframework.samples.petclinic.owner;
 
 import java.util.Map;
 import java.util.Optional;
-import java.time.LocalDate;
 
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.ModelMap;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,8 +27,6 @@ import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.format.annotation.DateTimeFormat;
 
 import jakarta.validation.Valid;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -39,19 +37,15 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
  * @author Arjen Poutsma
  * @author Michael Isvy
  * @author Dave Syer
- * @author Ricardo Costa Filho
+ * @author Wick Dynex
  */
 @Controller
 class VisitController {
 
 	private final OwnerRepository owners;
-	
-	// 1. INJECTED VISITREPOSITORY FOR ISOLATED DATABASE UPDATES
-	private final VisitRepository visits;
 
-	public VisitController(OwnerRepository owners, VisitRepository visits) {
+	public VisitController(OwnerRepository owners) {
 		this.owners = owners;
-		this.visits = visits;
 	}
 
 	@InitBinder
@@ -59,38 +53,37 @@ class VisitController {
 		dataBinder.setDisallowedFields("id", "*.id");
 	}
 
-	@ModelAttribute("owner")
-	public Owner loadOwner(@PathVariable("ownerId") int ownerId) {
-		Optional<Owner> optionalOwner = this.owners.findById(ownerId);
-		return optionalOwner.orElseThrow(() -> new IllegalArgumentException(
-				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct"));
-	}
+	/**
+	 * Carrega o Owner e o Pet para o model, sem criar nenhuma Visit nova.
+	 * A criação da Visit nova fica isolada apenas no fluxo de "new visit".
+	 */
+	@ModelAttribute
+	public void loadOwnerAndPet(@PathVariable("ownerId") int ownerId, @PathVariable("petId") int petId,
+			Map<String, Object> model) {
+		Optional<Owner> optionalOwner = owners.findById(ownerId);
+		Owner owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException(
+				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct "));
 
-	@ModelAttribute("pet")
-	public Pet loadPet(@PathVariable("ownerId") int ownerId, @PathVariable("petId") int petId, Map<String, Object> model) {
-		Owner owner = (Owner) model.get("owner");
-		if (owner == null) {
-			Optional<Owner> optionalOwner = this.owners.findById(ownerId);
-			owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException("Owner not found"));
-			model.put("owner", owner);
-		}
 		Pet pet = owner.getPet(petId);
 		if (pet == null) {
-			throw new IllegalArgumentException("Pet with id " + petId + " not found.");
+			throw new IllegalArgumentException(
+					"Pet with id " + petId + " not found for owner with id " + ownerId + ".");
 		}
-		return pet;
+		model.put("pet", pet);
+		model.put("owner", owner);
 	}
 
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/new")
 	public String initNewVisitForm(@ModelAttribute("pet") Pet pet, Map<String, Object> model) {
 		Visit visit = new Visit();
+		pet.addVisit(visit);
 		model.put("visit", visit);
 		return "pets/createOrUpdateVisitForm";
 	}
 
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/new")
-	public String processNewVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable int petId, 
-			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
+	public String processNewVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @Valid Visit visit,
+			BindingResult result, RedirectAttributes redirectAttributes) {
 		if (result.hasErrors()) {
 			return "pets/createOrUpdateVisitForm";
 		}
@@ -102,54 +95,42 @@ class VisitController {
 	}
 
 	/**
-	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Fetches the object directly from the database by its unique id, bypassing parent graph issues.
+	 * NEW: Method to initialize the form for editing an existing visit description. Part
+	 * of Issue #2338.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@PathVariable("visitId") int visitId, Map<String, Object> model) {
-		// Fetches single row using the specific VisitRepository mapping
-		Optional<Visit> optionalVisit = this.visits.findById(visitId);
-		if (optionalVisit.isPresent()) {
-			model.put("visit", optionalVisit.get());
+	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable int visitId, ModelMap model) {
+		for (Visit v : pet.getVisits()) {
+			if (v.getId() != null && v.getId() == visitId) {
+				model.put("visit", v);
+				break;
+			}
+		}
+		return "pets/createOrUpdateVisitForm";
+	}
+
+	/**
+	 * NEW: Method to process the modification of an existing visit description. Part of
+	 * Issue #2338.
+	 */
+	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
+	public String processEditVisitForm(@ModelAttribute Owner owner, @ModelAttribute("pet") Pet pet,
+			@PathVariable int visitId, @Valid Visit visit, BindingResult result,
+			RedirectAttributes redirectAttributes) {
+		if (result.hasErrors()) {
 			return "pets/createOrUpdateVisitForm";
 		}
+
+		for (Visit v : pet.getVisits()) {
+			if (v.getId() != null && v.getId() == visitId) {
+				v.setDescription(visit.getDescription());
+				v.setDate(visit.getDate());
+				break;
+			}
+		}
+		this.owners.save(owner);
+		redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
 		return "redirect:/owners/{ownerId}";
 	}
 
-	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String processEditVisitForm(
-			@ModelAttribute("owner") Owner owner, 
-			@PathVariable("petId") int petId, 
-			@PathVariable("visitId") int visitId, 
-			@RequestParam("description") String description,
-			@RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-			RedirectAttributes redirectAttributes) {
-		
-		if (date.isBefore(LocalDate.now())) {
-			redirectAttributes.addFlashAttribute("error", "The visit date must be today or a future date.");
-			return "redirect:/owners/" + owner.getId() + "/pets/" + petId + "/visits/" + visitId + "/edit";
-		}
-
-		Pet pet = owner.getPet(petId);
-		if (pet != null) {
-			// Localizamos a referência exata controlada pela sessão do Hibernate
-			Visit persistentVisit = null;
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId().equals(visitId)) {
-					persistentVisit = v;
-					break;
-				}
-			}
-			
-			if (persistentVisit != null) {
-				// Alteramos DIRETAMENTE a propriedade do objeto persistente original
-				persistentVisit.setDescription(description);
-				persistentVisit.setDate(date);
-				
-				// Sincronizamos limpando instâncias fantasmas que possam estar no Set por hashCode idêntico
-				this.owners.save(owner);
-				redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
-			}
-		}
-		return "redirect:/owners/{ownerId}";
-	}
+}
