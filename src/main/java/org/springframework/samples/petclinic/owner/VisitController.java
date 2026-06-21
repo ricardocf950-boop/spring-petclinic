@@ -13,13 +13,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Copyright 2012-2025 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.springframework.samples.petclinic.owner;
 
 import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.stereotype.Controller;
-import org.springframework.ui.ModelMap;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,16 +45,21 @@ import org.springframework.web.bind.annotation.PostMapping;
 import jakarta.validation.Valid;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+/**
+ * @author Juergen Hoeller
+ * @author Ken Krebs
+ * @author Arjen Poutsma
+ * @author Michael Isvy
+ * @author Dave Syer
+ * @author Wick Dynex
+ */
 @Controller
 class VisitController {
 
 	private final OwnerRepository owners;
-	// 1. Injected the repository to handle mutations directly at the persistence layer
-	private final VisitRepository visits; 
 
-	public VisitController(OwnerRepository owners, VisitRepository visits) {
+	public VisitController(OwnerRepository owners) {
 		this.owners = owners;
-		this.visits = visits;
 	}
 
 	@InitBinder
@@ -92,12 +111,46 @@ class VisitController {
 
 	/**
 	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Loads the target entity directly from the VisitRepository by its unique ID,
-	 * completely isolating the mutation from the collection context.
+	 * Binds the form to the specific visit context by matching the path variable ID.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@PathVariable("visitId") int visitId, ModelMap model) {
-		Optional<Visit> optionalVisit = this.visits.findById(visitId);
-		if (optionalVisit.isPresent()) {
-			model.put("visit", optionalVisit.get());
-			return "pets/createOr
+	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable("visitId") int visitId, Map<String, Object> model) {
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId().equals(visitId)) {
+					model.put("visit", v);
+					return "pets/createOrUpdateVisitForm";
+				}
+			}
+		}
+		return "redirect:/owners/{ownerId}";
+	}
+
+	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
+	public String processEditVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable("petId") int petId, @PathVariable("visitId") int visitId, 
+			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
+		
+		// Manual binding override to bypass disallowed 'id' field restriction during update
+		visit.setId(visitId);
+
+		if (result.hasErrors()) {
+			return "pets/createOrUpdateVisitForm";
+		}
+
+		Pet pet = owner.getPet(petId);
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId().equals(visitId)) {
+					// Mutates ONLY the exact matching object inside the graph
+					v.setDescription(visit.getDescription());
+					v.setDate(visit.getDate());
+					break;
+				}
+			}
+			this.owners.save(owner);
+			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
+		}
+		return "redirect:/owners/{ownerId}";
+	}
+
+}
