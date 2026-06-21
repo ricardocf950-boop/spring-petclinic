@@ -48,4 +48,20 @@ public class BaseEntity implements Serializable {
 		return this.id == null;
 	}
 
+	@Override
+	public boolean equals(Object o) {
+		if (this == o) {
+			return true;
+		}
+		if (!(o instanceof BaseEntity)) {
+			return false;
+		}
+		BaseEntity that = (BaseEntity) o;
+		return getId() != null && getId().equals(that.getId());
+	}
+
+	@Override
+	public int hashCode() {
+		return getClass().hashCode();
+	}
 }
