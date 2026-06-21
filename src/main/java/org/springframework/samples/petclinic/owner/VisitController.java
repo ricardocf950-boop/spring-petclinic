@@ -118,8 +118,8 @@ class VisitController {
 
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
 	public String processEditVisitForm(
-			@PathVariable("ownerId") int ownerId,
-			@PathVariable("petId") int petId,
+			@ModelAttribute("owner") Owner owner, 
+			@PathVariable("petId") int petId, 
 			@PathVariable("visitId") int visitId, 
 			@RequestParam("description") String description,
 			@RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
@@ -127,21 +127,29 @@ class VisitController {
 		
 		if (date.isBefore(LocalDate.now())) {
 			redirectAttributes.addFlashAttribute("error", "The visit date must be today or a future date.");
-			return "redirect:/owners/" + ownerId + "/pets/" + petId + "/visits/" + visitId + "/edit";
+			return "redirect:/owners/" + owner.getId() + "/pets/" + petId + "/visits/" + visitId + "/edit";
 		}
 
-		Optional<Visit> optionalVisit = this.visits.findById(visitId);
-		if (optionalVisit.isPresent()) {
-			Visit existingVisit = optionalVisit.get();
+		Pet pet = owner.getPet(petId);
+		if (pet != null) {
+			// Localizamos a referência exata controlada pela sessão do Hibernate
+			Visit persistentVisit = null;
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId().equals(visitId)) {
+					persistentVisit = v;
+					break;
+				}
+			}
 			
-			// Updates only the single targeted database record by its unique primary key ID
-			existingVisit.setDescription(description);
-			existingVisit.setDate(date);
-			
-			this.visits.save(existingVisit); 
-			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
+			if (persistentVisit != null) {
+				// Alteramos DIRETAMENTE a propriedade do objeto persistente original
+				persistentVisit.setDescription(description);
+				persistentVisit.setDate(date);
+				
+				// Sincronizamos limpando instâncias fantasmas que possam estar no Set por hashCode idêntico
+				this.owners.save(owner);
+				redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
+			}
 		}
-		return "redirect:/owners/" + ownerId;
+		return "redirect:/owners/{ownerId}";
 	}
-
-}
