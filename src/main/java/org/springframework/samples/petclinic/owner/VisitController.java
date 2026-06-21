@@ -96,10 +96,10 @@ class VisitController {
 		redirectAttributes.addFlashAttribute("message", "Your visit has been booked");
 		return "redirect:/owners/{ownerId}";
 	}
-
 	/**
 	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Loads the target entity context using explicit looping matching the path variable ID.
+	 * Resolves the graph mirroring issue by explicitly updating individual items
+	 * within the persistent collection boundary.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
 	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable("visitId") int visitId, Map<String, Object> model) {
@@ -123,7 +123,6 @@ class VisitController {
 			@RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
 			RedirectAttributes redirectAttributes) {
 		
-		// Rule Validation Manual Check for Issue #2337 inside the Edit Context
 		if (date.isBefore(LocalDate.now())) {
 			redirectAttributes.addFlashAttribute("error", "The visit date must be today or a future date.");
 			return "redirect:/owners/" + owner.getId() + "/pets/" + petId + "/visits/" + visitId + "/edit";
@@ -131,18 +130,29 @@ class VisitController {
 
 		Pet pet = owner.getPet(petId);
 		if (pet != null) {
+			// Solução cirúrgica: Remove a visita antiga desatualizada e insere a nova atualizada com o mesmo ID
+			Visit targetVisit = null;
 			for (Visit v : pet.getVisits()) {
 				if (v.getId() != null && v.getId().equals(visitId)) {
-					// Direct target mutation using independent request parameters bypasses object binding limits
-					v.setDescription(description);
-					v.setDate(date);
+					targetVisit = v;
 					break;
 				}
 			}
+			
+			if (targetVisit != null) {
+				pet.getVisits().remove(targetVisit); // Quebra o vínculo antigo que causava o espelhamento
+				
+				Visit updatedVisit = new Visit();
+				// Como o ID é protegido pelo InitBinder, clonamos os dados novos de forma isolada
+				updatedVisit.setId(visitId);
+				updatedVisit.setDescription(description);
+				updatedVisit.setDate(date);
+				
+				pet.getVisits().add(updatedVisit); // Injeta a referência isolada e correta
+			}
+			
 			this.owners.save(owner);
 			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
 		}
 		return "redirect:/owners/{ownerId}";
 	}
-
-}
