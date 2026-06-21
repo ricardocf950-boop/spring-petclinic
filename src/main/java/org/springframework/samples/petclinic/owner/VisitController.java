@@ -13,83 +13,62 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.samples.petclinic.owner;
-
-import java.util.Map;
-import java.util.Optional;
-
-import org.springframework.stereotype.Controller;
-import org.springframework.ui.ModelMap; // Adicionado para suporte na edição
-import org.springframework.validation.BindingResult;
-import org.springframework.web.bind.WebDataBinder;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.InitBinder;
-import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-
-import jakarta.validation.Valid;
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.web.servlet.mvc.support.RedirectAttributes;
-
 /**
- * @author Juergen Hoeller
- * @author Ken Krebs
- * @author Arjen Poutsma
- * @author Michael Isvy
- * @author Dave Syer
- * @author Wick Dynex
- */
-@Controller
-class VisitController {
-
-	private final OwnerRepository owners;
-
-	public VisitController(OwnerRepository owners) {
-		this.owners = owners;
+	 * REFACTORED ORIGINAL METHODS
+	 * Cleaned up the data binding process to ensure that models are loaded independently,
+	 * preventing unintended side effects or duplicate rows during binding.
+	 */
+	@ModelAttribute("owner")
+	public Owner loadOwner(@PathVariable("ownerId") int ownerId) {
+		Optional<Owner> optionalOwner = this.owners.findById(ownerId);
+		return optionalOwner.orElseThrow(() -> new IllegalArgumentException(
+				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct"));
 	}
 
-	@InitBinder
-	public void setAllowedFields(WebDataBinder dataBinder) {
-		dataBinder.setDisallowedFields("id", "*.id");
+	@ModelAttribute("pet")
+	public Pet loadPet(@PathVariable("ownerId") int ownerId, @PathVariable("petId") int petId, Map<String, Object> model) {
+		Owner owner = (Owner) model.get("owner");
+		if (owner == null) {
+			Optional<Owner> optionalOwner = this.owners.findById(ownerId);
+			owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException("Owner not found"));
+			model.put("owner", owner);
+		}
+		Pet pet = owner.getPet(petId);
+		if (pet == null) {
+			throw new IllegalArgumentException("Pet with id " + petId + " not found.");
+		}
+		return pet;
+	}
+
+	// Creation Flow - Get: Instantiates a clean, isolated object for the view
+	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/new")
+	public String initNewVisitForm(@ModelAttribute("pet") Pet pet, Map<String, Object> model) {
+		Visit visit = new Visit();
+		model.put("visit", visit);
+		return "pets/createOrUpdateVisitForm";
+	}
+
+	// Creation Flow - Post: Adds the visit to the pet list and persists upon confirmation
+	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/new")
+	public String processNewVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable int petId, 
+			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
+		if (result.hasErrors()) {
+			return "pets/createOrUpdateVisitForm";
+		}
+
+		owner.addVisit(petId, visit);
+		this.owners.save(owner);
+		redirectAttributes.addFlashAttribute("message", "Your visit has been booked");
+		return "redirect:/owners/{ownerId}";
 	}
 
 	/**
-	 * Called before each and every @RequestMapping annotated method. 2 goals: - Make sure
-	 * we always have fresh data - Since we do not use the session scope, make sure that
-	 * Pet object always has an id (Even though id is not part of the form fields)
-	 * @param petId
-	 * @return Pet
+	 * EDIT FLOW METHODS (ISSUE #2338)
+	 * Identifies the existing record by its ID and directly mutates the reference
+	 * within the object graph, avoiding any structural duplication.
 	 */
-	@ModelAttribute("visit")
-	public Visit loadPetWithVisit(@PathVariable("ownerId") int ownerId, @PathVariable("petId") int petId,
-			Map<String, Object> model, HttpServletRequest request) {
-		Optional<Owner> optionalOwner = owners.findById(ownerId);
-		Owner owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException(
-				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct "));
-
-		Pet pet = owner.getPet(petId);
-		if (pet == null) {
-			throw new IllegalArgumentException(
-					"Pet with id " + petId + " not found for owner with id " + ownerId + ".");
-		}
-		model.put("pet", pet);
-		model.put("owner", owner);
-
-		if (request.getRequestURI().endsWith("/new")) {
-			Visit visit = new Visit();
-			pet.addVisit(visit);
-			return visit;
-		}
-		
-		return new Visit();
-	}
-
-	// Spring MVC calls method loadPetWithVisit(...) before initNewVisitForm is
-	// called
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, ModelMap model) {
-		Pet pet = owner.getPet(petId);
+	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable int visitId, Map<String, Object> model) {
 		if (pet != null) {
 			for (Visit v : pet.getVisits()) {
 				if (v.getId() != null && v.getId() == visitId) {
@@ -102,7 +81,7 @@ class VisitController {
 	}
 
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String processEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, 
+	public String processEditVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable int petId, @PathVariable int visitId, 
 			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
 		if (result.hasErrors()) {
 			return "pets/createOrUpdateVisitForm";
@@ -112,6 +91,7 @@ class VisitController {
 		if (pet != null) {
 			for (Visit v : pet.getVisits()) {
 				if (v.getId() != null && v.getId() == visitId) {
+					// Updates data on the existing reference without appending duplicates
 					v.setDescription(visit.getDescription());
 					v.setDate(visit.getDate());
 					break;
@@ -122,48 +102,3 @@ class VisitController {
 		}
 		return "redirect:/owners/{ownerId}";
 	}
-	/**
-	 * NEW: Method to initialize the form for editing an existing visit description.
-	 * Part of Issue #2338.
-	 */
-	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, ModelMap model) {
-		Pet pet = owner.getPet(petId);
-		if (pet != null) {
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId() == visitId) {
-					model.put("visit", v);
-					break;
-				}
-			}
-		}
-		return "pets/createOrUpdateVisitForm"; // Reutilizando a view existente
-	}
-
-	/**
-	 * NEW: Method to process the modification of an existing visit description.
-	 * Part of Issue #2338.
-	 */
-	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String processEditVisitForm(@ModelAttribute Owner owner, @PathVariable int petId, @PathVariable int visitId, 
-			@Valid Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
-		if (result.hasErrors()) {
-			return "pets/createOrUpdateVisitForm";
-		}
-
-		Pet pet = owner.getPet(petId);
-		if (pet != null) {
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId() == visitId) {
-					v.setDescription(visit.getDescription());
-					v.setDate(visit.getDate());
-					break;
-				}
-			}
-			this.owners.save(owner);
-			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
-		}
-		return "redirect:/owners/{ownerId}";
-	}
-
-}
