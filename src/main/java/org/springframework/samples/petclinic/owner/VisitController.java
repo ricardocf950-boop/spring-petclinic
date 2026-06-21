@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2025 the original author or authors.
+ * Copyright 2012-2026 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,15 +36,19 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
  * @author Arjen Poutsma
  * @author Michael Isvy
  * @author Dave Syer
- * @author Wick Dynex
+ * @author Ricardo Costa Filho
  */
 @Controller
 class VisitController {
 
 	private final OwnerRepository owners;
+	
+	// Injected to allow direct single-row persistence operations
+	private final VisitRepository visits;
 
-	public VisitController(OwnerRepository owners) {
+	public VisitController(OwnerRepository owners, VisitRepository visits) {
 		this.owners = owners;
+		this.visits = visits;
 	}
 
 	@InitBinder
@@ -96,43 +100,34 @@ class VisitController {
 
 	/**
 	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Binds the form to the specific visit context by matching the path variable ID.
+	 * Fetches the targeted record straight from the persistence layer using its unique database key,
+	 * completely isolating the operation from the parent object graph.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable("visitId") int visitId, Map<String, Object> model) {
-		if (pet != null) {
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId().equals(visitId)) {
-					model.put("visit", v);
-					return "pets/createOrUpdateVisitForm";
-				}
-			}
+	public String initEditVisitForm(@PathVariable("visitId") int visitId, Map<String, Object> model) {
+		Optional<Visit> optionalVisit = this.visits.findById(visitId);
+		if (optionalVisit.isPresent()) {
+			model.put("visit", optionalVisit.get());
+			return "pets/createOrUpdateVisitForm";
 		}
 		return "redirect:/owners/{ownerId}";
 	}
 
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String processEditVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable("petId") int petId, @PathVariable("visitId") int visitId, 
+	public String processEditVisitForm(@PathVariable("visitId") int visitId, 
 			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
 		
-		// Manual binding override to bypass disallowed 'id' field restriction during update
-		visit.setId(visitId);
-
 		if (result.hasErrors()) {
 			return "pets/createOrUpdateVisitForm";
 		}
 
-		Pet pet = owner.getPet(petId);
-		if (pet != null) {
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId().equals(visitId)) {
-					// Mutates ONLY the exact matching object inside the graph
-					v.setDescription(visit.getDescription());
-					v.setDate(visit.getDate());
-					break;
-				}
-			}
-			this.owners.save(owner);
+		Optional<Visit> optionalVisit = this.visits.findById(visitId);
+		if (optionalVisit.isPresent()) {
+			Visit existingVisit = optionalVisit.get();
+			// Modifies strictly the targeted record to avoid cross-contamination in the collection
+			existingVisit.setDescription(visit.getDescription());
+			existingVisit.setDate(visit.getDate());
+			this.visits.save(existingVisit);
 			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
 		}
 		return "redirect:/owners/{ownerId}";
