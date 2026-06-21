@@ -45,9 +45,13 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 class VisitController {
 
 	private final OwnerRepository owners;
+	
+	// 1. INJECTED VISITREPOSITORY FOR ISOLATED DATABASE UPDATES
+	private final VisitRepository visits;
 
-	public VisitController(OwnerRepository owners) {
+	public VisitController(OwnerRepository owners, VisitRepository visits) {
 		this.owners = owners;
+		this.visits = visits;
 	}
 
 	@InitBinder
@@ -96,28 +100,26 @@ class VisitController {
 		redirectAttributes.addFlashAttribute("message", "Your visit has been booked");
 		return "redirect:/owners/{ownerId}";
 	}
+
 	/**
 	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Resolves the graph mirroring issue by explicitly updating individual items
-	 * within the persistent collection boundary.
+	 * Fetches the object directly from the database by its unique id, bypassing parent graph issues.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable("visitId") int visitId, Map<String, Object> model) {
-		if (pet != null) {
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId().equals(visitId)) {
-					model.put("visit", v);
-					return "pets/createOrUpdateVisitForm";
-				}
-			}
+	public String initEditVisitForm(@PathVariable("visitId") int visitId, Map<String, Object> model) {
+		// Fetches single row using the specific VisitRepository mapping
+		Optional<Visit> optionalVisit = this.visits.findById(visitId);
+		if (optionalVisit.isPresent()) {
+			model.put("visit", optionalVisit.get());
+			return "pets/createOrUpdateVisitForm";
 		}
 		return "redirect:/owners/{ownerId}";
 	}
 
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
 	public String processEditVisitForm(
-			@ModelAttribute("owner") Owner owner, 
-			@PathVariable("petId") int petId, 
+			@PathVariable("ownerId") int ownerId,
+			@PathVariable("petId") int petId,
 			@PathVariable("visitId") int visitId, 
 			@RequestParam("description") String description,
 			@RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
@@ -125,34 +127,21 @@ class VisitController {
 		
 		if (date.isBefore(LocalDate.now())) {
 			redirectAttributes.addFlashAttribute("error", "The visit date must be today or a future date.");
-			return "redirect:/owners/" + owner.getId() + "/pets/" + petId + "/visits/" + visitId + "/edit";
+			return "redirect:/owners/" + ownerId + "/pets/" + petId + "/visits/" + visitId + "/edit";
 		}
 
-		Pet pet = owner.getPet(petId);
-		if (pet != null) {
-			// Solução cirúrgica: Remove a visita antiga desatualizada e insere a nova atualizada com o mesmo ID
-			Visit targetVisit = null;
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId().equals(visitId)) {
-					targetVisit = v;
-					break;
-				}
-			}
+		Optional<Visit> optionalVisit = this.visits.findById(visitId);
+		if (optionalVisit.isPresent()) {
+			Visit existingVisit = optionalVisit.get();
 			
-			if (targetVisit != null) {
-				pet.getVisits().remove(targetVisit); // Quebra o vínculo antigo que causava o espelhamento
-				
-				Visit updatedVisit = new Visit();
-				// Como o ID é protegido pelo InitBinder, clonamos os dados novos de forma isolada
-				updatedVisit.setId(visitId);
-				updatedVisit.setDescription(description);
-				updatedVisit.setDate(date);
-				
-				pet.getVisits().add(updatedVisit); // Injeta a referência isolada e correta
-			}
+			// Updates only the single targeted database record by its unique primary key ID
+			existingVisit.setDescription(description);
+			existingVisit.setDate(date);
 			
-			this.owners.save(owner);
+			this.visits.save(existingVisit); 
 			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
 		}
-		return "redirect:/owners/{ownerId}";
+		return "redirect:/owners/" + ownerId;
 	}
+
+}
