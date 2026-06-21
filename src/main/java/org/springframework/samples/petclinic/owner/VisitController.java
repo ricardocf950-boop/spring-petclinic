@@ -17,6 +17,7 @@ package org.springframework.samples.petclinic.owner;
 
 import java.util.Map;
 import java.util.Optional;
+import java.time.LocalDate;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
@@ -26,6 +27,8 @@ import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.format.annotation.DateTimeFormat;
 
 import jakarta.validation.Valid;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -42,13 +45,9 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 class VisitController {
 
 	private final OwnerRepository owners;
-	
-	// Injected to allow direct single-row persistence operations
-	private final VisitRepository visits;
 
-	public VisitController(OwnerRepository owners, VisitRepository visits) {
+	public VisitController(OwnerRepository owners) {
 		this.owners = owners;
-		this.visits = visits;
 	}
 
 	@InitBinder
@@ -100,34 +99,47 @@ class VisitController {
 
 	/**
 	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Fetches the targeted record straight from the persistence layer using its unique database key,
-	 * completely isolating the operation from the parent object graph.
+	 * Loads the target entity context using explicit looping matching the path variable ID.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@PathVariable("visitId") int visitId, Map<String, Object> model) {
-		Optional<Visit> optionalVisit = this.visits.findById(visitId);
-		if (optionalVisit.isPresent()) {
-			model.put("visit", optionalVisit.get());
-			return "pets/createOrUpdateVisitForm";
+	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable("visitId") int visitId, Map<String, Object> model) {
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId().equals(visitId)) {
+					model.put("visit", v);
+					return "pets/createOrUpdateVisitForm";
+				}
+			}
 		}
 		return "redirect:/owners/{ownerId}";
 	}
 
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String processEditVisitForm(@PathVariable("visitId") int visitId, 
-			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
+	public String processEditVisitForm(
+			@ModelAttribute("owner") Owner owner, 
+			@PathVariable("petId") int petId, 
+			@PathVariable("visitId") int visitId, 
+			@RequestParam("description") String description,
+			@RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+			RedirectAttributes redirectAttributes) {
 		
-		if (result.hasErrors()) {
-			return "pets/createOrUpdateVisitForm";
+		// Rule Validation Manual Check for Issue #2337 inside the Edit Context
+		if (date.isBefore(LocalDate.now())) {
+			redirectAttributes.addFlashAttribute("error", "The visit date must be today or a future date.");
+			return "redirect:/owners/" + owner.getId() + "/pets/" + petId + "/visits/" + visitId + "/edit";
 		}
 
-		Optional<Visit> optionalVisit = this.visits.findById(visitId);
-		if (optionalVisit.isPresent()) {
-			Visit existingVisit = optionalVisit.get();
-			// Modifies strictly the targeted record to avoid cross-contamination in the collection
-			existingVisit.setDescription(visit.getDescription());
-			existingVisit.setDate(visit.getDate());
-			this.visits.save(existingVisit);
+		Pet pet = owner.getPet(petId);
+		if (pet != null) {
+			for (Visit v : pet.getVisits()) {
+				if (v.getId() != null && v.getId().equals(visitId)) {
+					// Direct target mutation using independent request parameters bypasses object binding limits
+					v.setDescription(description);
+					v.setDate(date);
+					break;
+				}
+			}
+			this.owners.save(owner);
 			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
 		}
 		return "redirect:/owners/{ownerId}";
