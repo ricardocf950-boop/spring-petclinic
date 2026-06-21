@@ -64,14 +64,15 @@
 
 	/**
 	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Identifies the existing record by its ID and directly mutates the reference
-	 * within the object graph, avoiding any structural duplication.
+	 * Explicitly looks up and binds the specific visit instance by its numeric ID
+	 * to prevent cross-mutations inside the collection.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable int visitId, Map<String, Object> model) {
+	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable("visitId") int visitId, Map<String, Object> model) {
 		if (pet != null) {
 			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId() == visitId) {
+				// Checks if the database ID matches the URL parameter exactly
+				if (v.getId() != null && v.getId().equals(visitId)) {
 					model.put("visit", v);
 					return "pets/createOrUpdateVisitForm";
 				}
@@ -81,7 +82,7 @@
 	}
 
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String processEditVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable int petId, @PathVariable int visitId, 
+	public String processEditVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable("petId") int petId, @PathVariable("visitId") int visitId, 
 			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
 		if (result.hasErrors()) {
 			return "pets/createOrUpdateVisitForm";
@@ -90,8 +91,8 @@
 		Pet pet = owner.getPet(petId);
 		if (pet != null) {
 			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId() == visitId) {
-					// Updates data on the existing reference without appending duplicates
+				if (v.getId() != null && v.getId().equals(visitId)) {
+					// Mutates ONLY the specific targeted row matching the database primary key
 					v.setDescription(visit.getDescription());
 					v.setDate(visit.getDate());
 					break;
