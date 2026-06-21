@@ -13,11 +13,41 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/**
-	 * REFACTORED ORIGINAL METHODS
-	 * Cleaned up the data binding process to ensure that models are loaded independently,
-	 * preventing unintended side effects or duplicate rows during binding.
-	 */
+package org.springframework.samples.petclinic.owner;
+
+import java.util.Map;
+import java.util.Optional;
+
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.ModelMap;
+import org.springframework.validation.BindingResult;
+import org.springframework.web.bind.WebDataBinder;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.InitBinder;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+
+import jakarta.validation.Valid;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+
+@Controller
+class VisitController {
+
+	private final OwnerRepository owners;
+	// 1. Injected the repository to handle mutations directly at the persistence layer
+	private final VisitRepository visits; 
+
+	public VisitController(OwnerRepository owners, VisitRepository visits) {
+		this.owners = owners;
+		this.visits = visits;
+	}
+
+	@InitBinder
+	public void setAllowedFields(WebDataBinder dataBinder) {
+		dataBinder.setDisallowedFields("id", "*.id");
+	}
+
 	@ModelAttribute("owner")
 	public Owner loadOwner(@PathVariable("ownerId") int ownerId) {
 		Optional<Owner> optionalOwner = this.owners.findById(ownerId);
@@ -40,7 +70,6 @@
 		return pet;
 	}
 
-	// Creation Flow - Get: Instantiates a clean, isolated object for the view
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/new")
 	public String initNewVisitForm(@ModelAttribute("pet") Pet pet, Map<String, Object> model) {
 		Visit visit = new Visit();
@@ -48,7 +77,6 @@
 		return "pets/createOrUpdateVisitForm";
 	}
 
-	// Creation Flow - Post: Adds the visit to the pet list and persists upon confirmation
 	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/new")
 	public String processNewVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable int petId, 
 			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
@@ -64,42 +92,12 @@
 
 	/**
 	 * EDIT FLOW METHODS (ISSUE #2338)
-	 * Explicitly looks up and binds the specific visit instance by its numeric ID
-	 * to prevent cross-mutations inside the collection.
+	 * Loads the target entity directly from the VisitRepository by its unique ID,
+	 * completely isolating the mutation from the collection context.
 	 */
 	@GetMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String initEditVisitForm(@ModelAttribute("pet") Pet pet, @PathVariable("visitId") int visitId, Map<String, Object> model) {
-		if (pet != null) {
-			for (Visit v : pet.getVisits()) {
-				// Checks if the database ID matches the URL parameter exactly
-				if (v.getId() != null && v.getId().equals(visitId)) {
-					model.put("visit", v);
-					return "pets/createOrUpdateVisitForm";
-				}
-			}
-		}
-		return "redirect:/owners/{ownerId}";
-	}
-
-	@PostMapping("/owners/{ownerId}/pets/{petId}/visits/{visitId}/edit")
-	public String processEditVisitForm(@ModelAttribute("owner") Owner owner, @PathVariable("petId") int petId, @PathVariable("visitId") int visitId, 
-			@Valid @ModelAttribute("visit") Visit visit, BindingResult result, RedirectAttributes redirectAttributes) {
-		if (result.hasErrors()) {
-			return "pets/createOrUpdateVisitForm";
-		}
-
-		Pet pet = owner.getPet(petId);
-		if (pet != null) {
-			for (Visit v : pet.getVisits()) {
-				if (v.getId() != null && v.getId().equals(visitId)) {
-					// Mutates ONLY the specific targeted row matching the database primary key
-					v.setDescription(visit.getDescription());
-					v.setDate(visit.getDate());
-					break;
-				}
-			}
-			this.owners.save(owner);
-			redirectAttributes.addFlashAttribute("message", "The visit description has been successfully updated");
-		}
-		return "redirect:/owners/{ownerId}";
-	}
+	public String initEditVisitForm(@PathVariable("visitId") int visitId, ModelMap model) {
+		Optional<Visit> optionalVisit = this.visits.findById(visitId);
+		if (optionalVisit.isPresent()) {
+			model.put("visit", optionalVisit.get());
+			return "pets/createOr
